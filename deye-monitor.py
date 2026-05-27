@@ -63,13 +63,12 @@ REGISTER_GROUPS = {
     ],
     "Load": [
         (176, "Load Power L1", "W", 1, 15),
+        (177, "Load Power L2", "W", 1, 15),
         (178, "Load Power Total", "W", 1, 15),
-        (157, "Load Voltage L1", "V", 0.1, 0),
-        (179, "Load Current L1", "A", 0.01, 15),
         (192, "Load Frequency", "Hz", 0.01, 0),
     ],
     "Battery": [
-        (182, "Battery Temp", "°C", 0.1, 0, 1000),
+        (182, "Battery Temp", "°C", 0.1, 0),
         (183, "Battery Voltage", "V", 0.01, 0),
         (184, "Battery SOC", "%", 1, 0),
         (190, "Battery Power", "W", 1, 15),
@@ -132,16 +131,13 @@ def read_all(solarman):
             i = chunk_end
             continue
 
-        for addr, name, unit, scale, sign_bit, *rest in chunk:
-            temp_offset = rest[0] if rest else 0
+        for addr, name, unit, scale, sign_bit in chunk:
             idx = addr - start
             if idx < len(raw):
                 val = raw[idx]
                 if sign_bit and val >= (1 << sign_bit):
                     val = val - (1 << 16)
-                if temp_offset:
-                    val = (val - temp_offset) * scale
-                values[name] = round(val, 2)
+                values[name] = round(val * scale, 2)
             else:
                 values[name] = None
         i = chunk_end
@@ -159,8 +155,7 @@ def format_power(watts):
 
 def print_readings(values):
     for group_name, regs in REGISTER_GROUPS.items():
-        for reg in regs:
-            addr, name, unit, scale, sign_bit = reg[:5]
+        for addr, name, unit, scale, sign_bit in regs:
             val = values.get(name)
             if val is None:
                 print(f"{name}  ---")
@@ -178,8 +173,7 @@ def write_csv_row(filepath, values):
         if not exists:
             writer.writerow(CSV_HEADER)
         row = [datetime.datetime.now().isoformat()]
-        for reg in ALL_REGISTERS:
-            name = reg[1]
+        for _, name, _, _, _ in ALL_REGISTERS:
             row.append(values.get(name))
         writer.writerow(row)
 
@@ -374,8 +368,7 @@ const layouts = {
     load: [
         { label: 'Load Total', key: 'Load Power Total', cls: 'watts' },
         { label: 'Load L1', key: 'Load Power L1', cls: 'watts' },
-        { label: 'Load Voltage L1', key: 'Load Voltage L1', cls: 'v' },
-        { label: 'Load Current L1', key: 'Load Current L1', cls: 'a' },
+        { label: 'Load L2', key: 'Load Power L2', cls: 'watts' },
         { label: 'Load Freq', key: 'Load Frequency', cls: 'freq' },
     ],
     battery: [
@@ -425,8 +418,8 @@ function render(data) {
             else if (f.key === 'Grid Frequency' || f.key === 'Load Frequency') unit = 'Hz';
             else if (f.key === 'Inverter Freq') unit = 'Hz';
             else if (f.key === 'AUX Frequency') unit = 'Hz';
-            else if (f.key === 'Grid Voltage' || f.key === 'PV1 Voltage' || f.key === 'PV2 Voltage' || f.key === 'Battery Voltage' || f.key === 'AUX Voltage' || f.key === 'Load Voltage L1') unit = 'V';
-            else if (f.key === 'PV1 Current' || f.key === 'PV2 Current' || f.key === 'Grid Current L' || f.key === 'Grid Current N' || f.key === 'Battery Current' || f.key === 'Batt Charge Limit' || f.key === 'Batt Discharge Limit' || f.key === 'Load Current L1') unit = 'A';
+            else if (f.key === 'Grid Voltage' || f.key === 'PV1 Voltage' || f.key === 'PV2 Voltage' || f.key === 'Battery Voltage' || f.key === 'AUX Voltage') unit = 'V';
+            else if (f.key === 'PV1 Current' || f.key === 'PV2 Current' || f.key === 'Grid Current L' || f.key === 'Grid Current N' || f.key === 'Battery Current' || f.key === 'Batt Charge Limit' || f.key === 'Batt Discharge Limit') unit = 'A';
             else if (f.key === 'PV1 Power' || f.key === 'PV2 Power' || f.key === 'Grid Power' || f.key === 'Grid CT Power' || f.key === 'Load Power Total' || f.key === 'Load Power L1' || f.key === 'Load Power L2' || f.key === 'Battery Power') unit = 'W';
             else unit = '';
             html += '<div class="row"><span class="row-label">' + f.label + '</span>' + fmt(val, unit) + '</div>';
