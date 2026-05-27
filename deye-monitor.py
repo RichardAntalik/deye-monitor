@@ -1,31 +1,24 @@
-#!/home/me/tools/deye/deye-env/bin/python3
-# -*- coding: utf-8 -*-
-"""Deye SUN-6k-SG03LP1-EU Solarman V5 / Modbus TCP reader.
+#!/usr/bin/env python3
+import os
+import sys
 
-Reads power statistics from a Deye hybrid inverter via Solarman V5 protocol
-(port 8899). Runs self-contained — finds its own Python environment.
-
-Usage:
-    ./deye-monitor.py              # One-shot read
-    ./deye-monitor.py --interval 60  # Continuous, log every 60s
-    ./deye-monitor.py --host 192.168.1.102 --interval 60  # Both
-"""
+_script_dir = os.path.dirname(os.path.abspath(__file__))
+_venv = os.path.join(_script_dir, 'venv')
+if os.path.isdir(_venv):
+    for entry in os.listdir(os.path.join(_venv, 'lib')):
+        sp = os.path.join(_venv, 'lib', entry, 'site-packages')
+        if os.path.isdir(sp):
+            sys.path.insert(0, sp)
+            break
 
 import argparse
 import csv
 import datetime
-import os
 import signal
-import sys
 import time
 
-try:
-    from pysolarmanv5 import PySolarmanV5
-    from pymodbus.exceptions import ModbusException
-except ImportError:
-    print("Error: pysolarmanv5 not installed.")
-    print("Run: pip install pysolarmanv5")
-    sys.exit(1)
+from pysolarmanv5 import PySolarmanV5
+from pymodbus.exceptions import ModbusException
 
 # ─── Configuration ──────────────────────────────────────────────────────────
 
@@ -75,7 +68,7 @@ REGISTER_GROUPS = {
         (183, "Battery Voltage", "V", 0.01, 0),
         (184, "Battery SOC", "%", 1, 0),
         (190, "Battery Power", "W", -1, 0),
-        (191, "Battery Current", "A", -0.01, 0),
+        (191, "Battery Current", "A", -1, 0),
         (314, "Batt Charge Limit", "A", -1, 0),
         (315, "Batt Discharge Limit", "A", -1, 0),
     ],
@@ -161,41 +154,16 @@ def format_power(watts):
     return f"{watts:+.0f} W"
 
 
-def print_header():
-    print("\n" + "=" * 70)
-    print("  Deye SUN-6k-SG03LP1-EU  |  Solarman V5 Monitor")
-    print("  Port: 8899  |  Slave: 1")
-    print("=" * 70)
-
-
-def print_readings(values, timestamp=None):
-    ts = timestamp or datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    print(f"\n  {ts}")
-    print("-" * 70)
-
+def print_readings(values):
     for group_name, regs in REGISTER_GROUPS.items():
-        print(f"\n  [{group_name}]")
         for addr, name, unit, scale, sign_bit in regs:
             val = values.get(name)
             if val is None:
-                print(f"    {name:<25s}  {'---':>10s}")
+                print(f"{name}  ---")
             elif unit == "W":
-                print(f"    {name:<25s}  {format_power(val):>10s}")
+                print(f"{name}  {format_power(val)}")
             else:
-                print(f"    {name:<25s}  {val:>10.2f} {unit}")
-
-    grid_power = values.get("Grid Power")
-    pv_power = (values.get("PV1 Power") or 0) + (values.get("PV2 Power") or 0)
-    load_power = values.get("Load Power Total")
-    batt_power = values.get("Battery Power")
-
-    print("\n" + "-" * 70)
-    print("  SUMMARY")
-    print("-" * 70)
-    print(f"    PV Generation:           {format_power(pv_power)}")
-    print(f"    Grid Import/Export:      {format_power(grid_power)}")
-    print(f"    Load Consumption:        {format_power(load_power)}")
-    print(f"    Battery Charge/Disch:    {format_power(batt_power)}")
+                print(f"{name}  {val:.2f} {unit}")
     print()
 
 
@@ -242,10 +210,6 @@ def main():
 
     signal.signal(signal.SIGINT, signal_handler)
 
-    print_header()
-    print(f"\n  Connecting to {args.host}:{args.port} ...")
-    print(f"  Serial number: {INVERTER_SN}")
-
     solarman = PySolarmanV5(
         args.host,
         INVERTER_SN,
@@ -256,21 +220,12 @@ def main():
     )
 
     try:
-        # Test connection by reading a known register
-        test = solarman.read_holding_registers(79, 1)  # Grid frequency
-        print(f"  Connected! Grid freq register: {test}\n")
+        solarman.read_holding_registers(79, 1)
     except Exception as e:
-        print(f"\n  ERROR: Cannot connect to inverter.")
-        print(f"  Details: {e}")
-        print("\n  Common issues:")
-        print("    - Wrong serial number (check sticker on inverter/logger)")
-        print("    - Inverter not on the same network")
-        print("    - Solarman protocol not enabled in inverter settings")
+        print(f"ERROR: Cannot connect to inverter: {e}")
         sys.exit(1)
 
     if args.interval > 0:
-        print(f"  Logging every {args.interval}s to {args.log_file}")
-        print(f"  Press Ctrl+C to stop.\n")
         try:
             while True:
                 values = read_all(solarman)
@@ -278,7 +233,7 @@ def main():
                     print_readings(values)
                     write_csv_row(args.log_file, values)
                 else:
-                    print("  Warning: Read failed, retrying...")
+                    print("Warning: Read failed, retrying...")
                 time.sleep(args.interval)
         except KeyboardInterrupt:
             signal_handler(None, None)
@@ -287,11 +242,7 @@ def main():
         if values:
             print_readings(values)
         else:
-            print("\n  ERROR: Failed to read registers.")
-            print("  Possible causes:")
-            print("    - Serial number is incorrect")
-            print("    - Inverter firmware blocks Modbus access")
-            print("    - Data logger (LSW3/LSW4) not properly configured")
+            print("ERROR: Failed to read registers.")
 
     solarman.disconnect()
 
