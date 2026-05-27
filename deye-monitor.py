@@ -63,8 +63,9 @@ REGISTER_GROUPS = {
     ],
     "Load": [
         (176, "Load Power L1", "W", 1, 15),
-        (177, "Load Power L2", "W", 1, 15),
         (178, "Load Power Total", "W", 1, 15),
+        (157, "Load Voltage L1", "V", 0.1, 0),
+        (179, "Load Current L1", "A", 0.01, 15),
         (192, "Load Frequency", "Hz", 0.01, 0),
     ],
     "Battery": [
@@ -137,7 +138,11 @@ def read_all(solarman):
                 val = raw[idx]
                 if sign_bit and val >= (1 << sign_bit):
                     val = val - (1 << 16)
-                values[name] = round(val * scale, 2)
+                if addr == 182:
+                    val = (val - 1000) * scale
+                else:
+                    val = val * scale
+                values[name] = round(val, 2)
             else:
                 values[name] = None
         i = chunk_end
@@ -368,7 +373,8 @@ const layouts = {
     load: [
         { label: 'Load Total', key: 'Load Power Total', cls: 'watts' },
         { label: 'Load L1', key: 'Load Power L1', cls: 'watts' },
-        { label: 'Load L2', key: 'Load Power L2', cls: 'watts' },
+        { label: 'Load Voltage L1', key: 'Load Voltage L1', cls: 'v' },
+        { label: 'Load Current L1', key: 'Load Current L1', cls: 'a' },
         { label: 'Load Freq', key: 'Load Frequency', cls: 'freq' },
     ],
     battery: [
@@ -418,8 +424,8 @@ function render(data) {
             else if (f.key === 'Grid Frequency' || f.key === 'Load Frequency') unit = 'Hz';
             else if (f.key === 'Inverter Freq') unit = 'Hz';
             else if (f.key === 'AUX Frequency') unit = 'Hz';
-            else if (f.key === 'Grid Voltage' || f.key === 'PV1 Voltage' || f.key === 'PV2 Voltage' || f.key === 'Battery Voltage' || f.key === 'AUX Voltage') unit = 'V';
-            else if (f.key === 'PV1 Current' || f.key === 'PV2 Current' || f.key === 'Grid Current L' || f.key === 'Grid Current N' || f.key === 'Battery Current' || f.key === 'Batt Charge Limit' || f.key === 'Batt Discharge Limit') unit = 'A';
+            else if (f.key === 'Grid Voltage' || f.key === 'PV1 Voltage' || f.key === 'PV2 Voltage' || f.key === 'Battery Voltage' || f.key === 'AUX Voltage' || f.key === 'Load Voltage L1') unit = 'V';
+            else if (f.key === 'PV1 Current' || f.key === 'PV2 Current' || f.key === 'Grid Current L' || f.key === 'Grid Current N' || f.key === 'Battery Current' || f.key === 'Batt Charge Limit' || f.key === 'Batt Discharge Limit' || f.key === 'Load Current L1') unit = 'A';
             else if (f.key === 'PV1 Power' || f.key === 'PV2 Power' || f.key === 'Grid Power' || f.key === 'Grid CT Power' || f.key === 'Load Power Total' || f.key === 'Load Power L1' || f.key === 'Load Power L2' || f.key === 'Battery Power') unit = 'W';
             else unit = '';
             html += '<div class="row"><span class="row-label">' + f.label + '</span>' + fmt(val, unit) + '</div>';
