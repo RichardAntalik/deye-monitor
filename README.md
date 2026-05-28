@@ -2,13 +2,21 @@
 
 Monitor a Deye SUN-6k-SG03LP1-EU hybrid solar inverter via Modbus/TCP over Ethernet.
 
-## Features
+## Architecture
 
-- Polls inverter registers every 3 seconds via Solarman V5 protocol
-- Live dashboard at `http://<host>:80` showing PV, Grid, Load, and Battery readings
-- Historical data stored in SQLite with time-range queries via `/api/readings`
-- Battery State of Charge (SOC) tracked in both dashboard and graph
-- Automatic reconnection on lost connection
+Flask-based multi-app server. Each application lives in its own subdirectory with its own `config.json`, `__init__.py`, `routes.py`, and `inverter.py`. The dispatcher (`app.py`) auto-scans subdirectories, loads per-app config, and registers blueprints under `/{appname}`.
+
+```
+app.py              # Dispatcher (Flask server, blueprint auto-registration)
+deye/               # PV monitor application
+    config.json     # App-specific configuration
+    __init__.py     # Blueprint + create_app()
+    inverter.py     # Modbus polling, SQLite logging, Inverter class
+    routes.py       # Flask routes
+    dashboard.html  # Frontend template
+```
+
+To add a new app, create a subdirectory with `config.json`, `__init__.py` (defines `bp` and `create_app()`), and `routes.py`. It auto-registers under `/{dirname}`.
 
 ## Requirements
 
@@ -22,22 +30,33 @@ pip install -r requirements.txt
 ## Usage
 
 ```
-python3 deye-monitor.py --host 192.168.1.2 --db /path/to/data.db
+python3 app.py
 ```
 
 | Argument | Default | Description |
 |---|---|---|
-| `--host` | `192.168.1.2` | Inverter IP address |
-| `--port` | `8899` | Modbus TCP port |
-| `--db` | *(none)* | SQLite database file path for historical logging |
+| `--http-host` | `0.0.0.0` | HTTP bind address |
+| `--http-port` | `80` | HTTP port |
+
+Configuration is per-app in each app's `config.json`:
+
+```json
+{
+    "host": "192.168.1.2",
+    "port": 8899,
+    "sn": 3168400438,
+    "interval": 3,
+    "db": "test.db"
+}
+```
 
 ### Endpoints
 
 | Path | Description |
 |---|---|
-| `/` | Live dashboard (HTML) |
-| `/PV` | Latest readings as JSON |
-| `/api/readings?start=<ts>&end=<ts>` | Historical readings (Unix timestamps) |
+| `/deye/` | Live dashboard (HTML) |
+| `/deye/PV` | Latest readings as JSON |
+| `/deye/api/readings?start=<ts>&end=<ts>` | Historical readings (Unix timestamps) |
 
 ## Register Map
 

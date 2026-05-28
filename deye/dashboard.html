@@ -330,7 +330,7 @@ function render(data) {
 }
 
 function update() {
-    fetch('/PV')
+    fetch('PV')
         .then(r => r.json())
         .then(data => {
             render(data);
@@ -578,7 +578,7 @@ function loadGraphData() {
         startTs = now - hours * 3600;
     }
 
-    fetch('/api/readings?start=' + startTs + '&end=' + endTs)
+    fetch('api/readings?start=' + startTs + '&end=' + endTs)
         .then(r => r.json())
         .then(data => {
             if (!graphInitialized) {
