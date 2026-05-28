@@ -12,10 +12,9 @@ if os.path.isdir(_venv):
             break
 
 import argparse
-import csv
-import datetime
 import json
 import signal
+import sqlite3
 import threading
 import time
 from http.server import HTTPServer, BaseHTTPRequestHandler
@@ -23,6 +22,8 @@ from http.server import HTTPServer, BaseHTTPRequestHandler
 from pysolarmanv5 import PySolarmanV5
 from pysolarmanv5.pysolarmanv5 import NoSocketAvailableError
 from pymodbus.exceptions import ModbusException
+from umodbus.exceptions import ModbusError as UmodbusError
+import struct
 
 # ─── Configuration ──────────────────────────────────────────────────────────
 
@@ -30,7 +31,6 @@ INVERTER_IP = "192.168.1.2"
 INVERTER_PORT = 8899
 INVERTER_SN = 3168400438
 MB_SLAVE_ID = 1
-LOG_FILE = "deye-data.csv"
 HTTP_HOST = "0.0.0.0"
 HTTP_PORT = 80
 
@@ -89,18 +89,40 @@ for group_regs in REGISTER_GROUPS.values():
     ALL_REGISTERS.extend(group_regs)
 ALL_REGISTERS.sort(key=lambda r: r[0])
 
-CSV_HEADER = ["Timestamp"] + [r[1] for r in ALL_REGISTERS]
 
 # ─── Helpers ────────────────────────────────────────────────────────────────
 
+_last_error_time = 0
+_error_count = 0
+
 def read_chunk(solarman, start_addr, count):
+    global _last_error_time, _error_count
     try:
         raw = solarman.read_holding_registers(start_addr, count)
         return list(raw)
-    except ModbusException:
+    except (ModbusException, UmodbusError):
+        _error_count += 1
+        now = time.time()
+        if now - _last_error_time > 60:
+            print(f"  Modbus error at addr {start_addr} (count={_error_count})")
+            _last_error_time = now
+            _error_count = 0
+        return None
+    except struct.error:
+        _error_count += 1
+        now = time.time()
+        if now - _last_error_time > 60:
+            print(f"  Struct error at addr {start_addr} (count={_error_count})")
+            _last_error_time = now
+            _error_count = 0
         return None
     except Exception as e:
-        print(f"  Read error at addr {start_addr}: {e}")
+        _error_count += 1
+        now = time.time()
+        if now - _last_error_time > 60:
+            print(f"  Read error at addr {start_addr}: {e}")
+            _last_error_time = now
+            _error_count = 0
         return None
 
 
@@ -108,7 +130,7 @@ def read_all(solarman):
     if not ALL_REGISTERS:
         return {}
 
-    MAX_CHUNK = 120
+    MAX_CHUNK = 50
     values = {}
     all_ok = True
 
@@ -171,291 +193,104 @@ def print_readings(values):
     print()
 
 
-def write_csv_row(filepath, values):
-    exists = os.path.isfile(filepath)
-    with open(filepath, "a", newline="") as f:
-        writer = csv.writer(f)
-        if not exists:
-            writer.writerow(CSV_HEADER)
-        row = [datetime.datetime.now().isoformat()]
+# ─── SQLite Logger ──────────────────────────────────────────────────────────
+
+_db_conn = None
+_db_write_interval = 60
+_reading_buffer = []
+_buffer_lock = threading.Lock()
+_db_stop_event = threading.Event()
+
+
+def _create_db(db_path):
+    global _db_conn
+    os.makedirs(os.path.dirname(os.path.abspath(db_path)), exist_ok=True)
+    _db_conn = sqlite3.connect(db_path, check_same_thread=False)
+    _db_conn.execute("PRAGMA journal_mode=WAL")
+    col_defs = []
+    for _, name, _, _, _ in ALL_REGISTERS:
+        col_defs.append(f'`{name}` REAL')
+    _db_conn.execute(f"""CREATE TABLE IF NOT EXISTS readings (
+        timestamp INTEGER PRIMARY KEY,
+        {', '.join(col_defs)}
+    )""")
+    _db_conn.commit()
+
+
+def _average_readings(readings):
+    result = {}
+    for _, name, _, _, _ in ALL_REGISTERS:
+        vals = [r.get(name) for r in readings if r.get(name) is not None]
+        if vals:
+            result[name] = round(sum(vals) / len(vals), 2)
+        else:
+            result[name] = None
+    return result
+
+
+def _db_writer(db_path, interval):
+    _create_db(db_path)
+    while not _db_stop_event.is_set():
+        _db_stop_event.wait(interval)
+        if _db_stop_event.is_set():
+            break
+        with _buffer_lock:
+            batch = _reading_buffer[:]
+            _reading_buffer.clear()
+        if not batch:
+            continue
+        avg = _average_readings(batch)
+        ts = int(time.time())
+        try:
+            cols = []
+            vals = []
+            for _, name, _, _, _ in ALL_REGISTERS:
+                cols.append(f'`{name}`')
+                v = avg.get(name)
+                vals.append('NULL' if v is None else str(v))
+            sql = f"INSERT OR REPLACE INTO readings (timestamp, {', '.join(cols)}) VALUES ({ts}, {', '.join(vals)})"
+            _db_conn.execute(sql)
+            _db_conn.commit()
+        except Exception as e:
+            print(f"  DB write error: {e}")
+
+
+def _flush_last_batch():
+    with _buffer_lock:
+        batch = _reading_buffer[:]
+        _reading_buffer.clear()
+    if not batch:
+        return
+    avg = _average_readings(batch)
+    ts = int(time.time())
+    try:
+        cols = []
+        vals = []
         for _, name, _, _, _ in ALL_REGISTERS:
-            row.append(values.get(name))
-        writer.writerow(row)
+            cols.append(f'`{name}`')
+            v = avg.get(name)
+            vals.append('NULL' if v is None else str(v))
+        sql = f"INSERT OR REPLACE INTO readings (timestamp, {', '.join(cols)}) VALUES ({ts}, {', '.join(vals)})"
+        _db_conn.execute(sql)
+        _db_conn.commit()
+        print(f"  Final batch written to DB: {len(batch)} readings")
+    except Exception as e:
+        print(f"  DB write error on shutdown: {e}")
 
 
 def signal_handler(signum, frame):
     print("\n\nStopped.")
+    if _db_conn:
+        _db_stop_event.set()
+        _flush_last_batch()
+        _db_conn.close()
     sys.exit(0)
 
 
-# ─── HTML Dashboard ─────────────────────────────────────────────────────────
-
-DASHBOARD_HTML = r"""<!DOCTYPE html>
-<html lang="en">
-<head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>PV Monitor</title>
-<style>
-* { margin: 0; padding: 0; box-sizing: border-box; }
-
-body {
-    font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
-    background: #0d1117;
-    color: #c9d1d9;
-    min-height: 100vh;
-    padding: 16px;
-}
-
-h1 {
-    text-align: center;
-    font-size: 1.4rem;
-    font-weight: 600;
-    color: #58a6ff;
-    margin-bottom: 16px;
-    letter-spacing: 0.5px;
-}
-
-.quad {
-    display: grid;
-    grid-template-columns: 1fr 1fr;
-    grid-template-rows: 1fr 1fr;
-    gap: 12px;
-    height: calc(100vh - 80px);
-    max-height: 700px;
-}
-
-.card {
-    background: #161b22;
-    border: 1px solid #30363d;
-    border-radius: 12px;
-    padding: 16px;
-    display: flex;
-    flex-direction: column;
-    overflow: hidden;
-}
-
-.card-title {
-    font-size: 0.85rem;
-    font-weight: 600;
-    text-transform: uppercase;
-    letter-spacing: 1px;
-    margin-bottom: 12px;
-    padding-bottom: 8px;
-    border-bottom: 1px solid #21262d;
-}
-
-.card-title .icon { margin-right: 6px; }
-
-.solar .card-title { color: #f0883e; }
-.grid .card-title { color: #3fb950; }
-.load .card-title { color: #d29922; }
-.battery .card-title { color: #a371f7; }
-
-.readings {
-    flex: 1;
-    display: flex;
-    flex-direction: column;
-    justify-content: center;
-    gap: 6px;
-}
-
-.row {
-    display: flex;
-    justify-content: space-between;
-    align-items: baseline;
-    padding: 4px 0;
-}
-
-.row-label {
-    font-size: 0.8rem;
-    color: #8b949e;
-    flex-shrink: 0;
-    margin-right: 12px;
-}
-
-.row-value {
-    font-size: 1.1rem;
-    font-weight: 600;
-    font-variant-numeric: tabular-nums;
-    text-align: right;
-}
-
-.row-value.w { color: #f0883e; }
-.row-value.v { color: #79c0ff; }
-.row-value.a { color: #ffa657; }
-.row-value.watts { color: #d2a8ff; }
-.row-value.freq { color: #7ee787; }
-.row-value.pct { color: #a371f7; }
-.row-value.temp { color: #79c0ff; }
-.row-value.na { color: #484f58; }
-
-.status-bar {
-    text-align: center;
-    font-size: 0.7rem;
-    color: #484f58;
-    margin-top: 8px;
-}
-
-.status-bar .error { color: #f85149; }
-
-/* Large values */
-.big {
-    font-size: 2rem;
-    font-weight: 700;
-    text-align: center;
-    margin: 4px 0;
-}
-
-/* Responsive */
-@media (max-width: 600px) {
-    body { padding: 8px; }
-    .quad { gap: 8px; height: calc(100vh - 60px); }
-    .card { padding: 12px; border-radius: 8px; }
-    .card-title { font-size: 0.75rem; }
-    .row-label { font-size: 0.7rem; margin-right: 8px; }
-    .row-value { font-size: 0.95rem; }
-    .big { font-size: 1.5rem; }
-    h1 { font-size: 1.1rem; }
-}
-
-@media (max-height: 500px) and (orientation: landscape) {
-    body { padding: 4px; }
-    .quad { gap: 6px; height: calc(100vh - 40px); }
-    .card { padding: 8px; }
-    .card-title { font-size: 0.7rem; margin-bottom: 6px; }
-    .row-label { font-size: 0.65rem; }
-    .row-value { font-size: 0.85rem; }
-    .big { font-size: 1.3rem; }
-}
-</style>
-</head>
-<body>
-<h1>Photovoltaic Monitor</h1>
-<div class="quad">
-    <div class="card solar">
-        <div class="card-title"><span class="icon">&#9729;</span>Solar PV</div>
-        <div class="readings" id="solar"></div>
-    </div>
-    <div class="card grid">
-        <div class="card-title"><span class="icon">&#9889;</span>Grid</div>
-        <div class="readings" id="grid"></div>
-    </div>
-    <div class="card load">
-        <div class="card-title"><span class="icon">&#128268;</span>Load</div>
-        <div class="readings" id="load"></div>
-    </div>
-    <div class="card battery">
-        <div class="card-title"><span class="icon">&#128267;</span>Battery</div>
-        <div class="readings" id="battery"></div>
-    </div>
-</div>
-<div class="status-bar" id="status">Connecting...</div>
-
-<script>
-const layouts = {
-    solar: [
-        { label: 'PV1 Power', key: 'PV1 Power', cls: 'w' },
-        { label: 'PV2 Power', key: 'PV2 Power', cls: 'w' },
-        { label: 'Total Power', key: '_total_pv', cls: 'w' },
-        { label: 'PV1 Voltage', key: 'PV1 Voltage', cls: 'v' },
-        { label: 'PV1 Current', key: 'PV1 Current', cls: 'a' },
-        { label: 'PV2 Voltage', key: 'PV2 Voltage', cls: 'v' },
-        { label: 'PV2 Current', key: 'PV2 Current', cls: 'a' },
-    ],
-    grid: [
-        { label: 'Grid Power', key: 'Grid Power', cls: 'watts' },
-        { label: 'CT Power', key: 'Grid CT Power', cls: 'watts' },
-        { label: 'Grid Voltage', key: 'Grid Voltage', cls: 'v' },
-        { label: 'Grid Current L', key: 'Grid Current L', cls: 'a' },
-        { label: 'Grid Freq', key: 'Grid Frequency', cls: 'freq' },
-    ],
-    load: [
-        { label: 'Load Total', key: 'Load Power Total', cls: 'watts' },
-        { label: 'Load L1', key: 'Load Power L1', cls: 'watts' },
-        { label: 'Load Voltage L1', key: 'Load Voltage L1', cls: 'v' },
-        { label: 'Load Current L1', key: 'Load Current L1', cls: 'a' },
-        { label: 'Load Freq', key: 'Load Frequency', cls: 'freq' },
-    ],
-    battery: [
-        { label: 'Battery Power', key: 'Battery Power', cls: 'watts' },
-        { label: 'SOC', key: 'Battery SOC', cls: 'pct' },
-        { label: 'Battery Voltage', key: 'Battery Voltage', cls: 'v' },
-        { label: 'Battery Current', key: 'Battery Current', cls: 'a' },
-        { label: 'Battery Temp', key: 'Battery Temp', cls: 'temp' },
-        { label: 'Charge Limit', key: 'Batt Charge Limit', cls: 'a' },
-        { label: 'Discharge Limit', key: 'Batt Discharge Limit', cls: 'a' },
-    ],
-};
-
-function fmt(val, unit) {
-    if (val === null || val === undefined || val === 'N/A') return '<span class="row-value na">N/A</span>';
-    if (unit === 'W') {
-        const w = parseFloat(val);
-        if (isNaN(w)) return '<span class="row-value na">N/A</span>';
-        if (Math.abs(w) >= 1000) return '<span class="row-value ' + (layouts._tempCls || 'watts') + '">' + (w/1000).toFixed(2) + ' kW</span>';
-        return '<span class="row-value ' + (layouts._tempCls || 'watts') + '">' + w.toFixed(0) + ' W</span>';
-    }
-    return '<span class="row-value ' + (layouts._tempCls || '') + '">' + parseFloat(val).toFixed(2) + ' ' + unit + '</span>';
-}
-
-function render(data) {
-    for (const [zone, fields] of Object.entries(layouts)) {
-        const el = document.getElementById(zone);
-        let html = '';
-        for (const f of fields) {
-            let val = data[f.key];
-            let unit = '';
-            if (f.key === '_total_pv') {
-                const p1 = parseFloat(data['PV1 Power'] || 0);
-                const p2 = parseFloat(data['PV2 Power'] || 0);
-                const total = p1 + p2;
-                if (Math.abs(total) >= 1000) {
-                    val = (total/1000).toFixed(2) + ' kW';
-                } else {
-                    val = total.toFixed(0) + ' W';
-                }
-                html += '<div class="row"><span class="row-label">' + f.label + '</span>' +
-                    '<span class="row-value w" style="font-size:1.3rem">' + val + '</span></div>';
-                continue;
-            }
-            if (f.key === 'Battery SOC') unit = '%';
-            else if (f.key === 'Battery Temp') unit = '°C';
-            else if (f.key === 'Grid Frequency' || f.key === 'Load Frequency') unit = 'Hz';
-            else if (f.key === 'Inverter Freq') unit = 'Hz';
-            else if (f.key === 'AUX Frequency') unit = 'Hz';
-            else if (f.key === 'Grid Voltage' || f.key === 'PV1 Voltage' || f.key === 'PV2 Voltage' || f.key === 'Battery Voltage' || f.key === 'AUX Voltage' || f.key === 'Load Voltage L1') unit = 'V';
-            else if (f.key === 'PV1 Current' || f.key === 'PV2 Current' || f.key === 'Grid Current L' || f.key === 'Grid Current N' || f.key === 'Battery Current' || f.key === 'Batt Charge Limit' || f.key === 'Batt Discharge Limit' || f.key === 'Load Current L1') unit = 'A';
-            else if (f.key === 'PV1 Power' || f.key === 'PV2 Power' || f.key === 'Grid Power' || f.key === 'Grid CT Power' || f.key === 'Load Power Total' || f.key === 'Load Power L1' || f.key === 'Load Power L2' || f.key === 'Battery Power') unit = 'W';
-            else unit = '';
-            html += '<div class="row"><span class="row-label">' + f.label + '</span>' + fmt(val, unit) + '</div>';
-        }
-        el.innerHTML = html;
-    }
-}
-
-function update() {
-    fetch('/PV')
-        .then(r => r.json())
-        .then(data => {
-            render(data);
-            document.getElementById('status').textContent = 'Updated ' + new Date().toLocaleTimeString();
-            document.getElementById('status').className = 'status-bar';
-        })
-        .catch(e => {
-            document.getElementById('status').innerHTML = '<span class="error">Error: ' + e.message + '</span>';
-        });
-}
-
-update();
-setInterval(update, 3000);
-</script>
-</body>
-</html>
-"""
-
-
 # ─── HTTP Handler ───────────────────────────────────────────────────────────
+
+_script_dir = os.path.dirname(os.path.abspath(__file__))
+_dashboard_path = os.path.join(_script_dir, 'dashboard.html')
 
 solarman = None
 latest_data = None
@@ -472,11 +307,15 @@ class PVHandler(BaseHTTPRequestHandler):
             self.send_header('Cache-Control', 'no-cache')
             self.end_headers()
             self.wfile.write(payload.encode())
+        elif self.path.startswith('/api/readings'):
+            self._handle_readings_api()
         elif self.path == '/':
+            with open(_dashboard_path, 'r') as f:
+                html = f.read()
             self.send_response(200)
             self.send_header('Content-Type', 'text/html')
             self.end_headers()
-            self.wfile.write(DASHBOARD_HTML.encode())
+            self.wfile.write(html.encode())
         else:
             self.send_response(404)
             self.end_headers()
@@ -484,17 +323,84 @@ class PVHandler(BaseHTTPRequestHandler):
     def log_message(self, format, *args):
         pass
 
+    def _handle_readings_api(self):
+        from urllib.parse import urlparse, parse_qs
+        parsed = urlparse(self.path)
+        params = parse_qs(parsed.query)
+        start = params.get('start', [None])[0]
+        end = params.get('end', [None])[0]
+        if not start or not end:
+            self.send_response(400)
+            self.send_header('Content-Type', 'application/json')
+            self.end_headers()
+            self.wfile.write(json.dumps({"error": "start and end parameters required"}).encode())
+            return
+        start = int(start)
+        end = int(end)
+        try:
+            col_names_str = ', '.join([f'`{r[1]}`' for r in ALL_REGISTERS])
+            sql = f"SELECT timestamp, {col_names_str} FROM readings WHERE timestamp >= ? AND timestamp <= ? ORDER BY timestamp"
+            cur = _db_conn.cursor()
+            cur.execute(sql, (start, end))
+            rows = cur.fetchall()
+            if not rows:
+                self.send_response(200)
+                self.send_header('Content-Type', 'application/json')
+                self.end_headers()
+                self.wfile.write(json.dumps([]).encode())
+                return
+            col_names = [desc[0] for desc in cur.description]
+            result = []
+            for row in rows:
+                obj = {}
+                for i, name in enumerate(col_names):
+                    val = row[i]
+                    if name == 'timestamp':
+                        obj[name] = val
+                    else:
+                        obj[name] = float(val) if val is not None else None
+                result.append(obj)
+            self.send_response(200)
+            self.send_header('Content-Type', 'application/json')
+            self.end_headers()
+            self.wfile.write(json.dumps(result).encode())
+        except Exception as e:
+            self.send_response(500)
+            self.send_header('Content-Type', 'application/json')
+            self.end_headers()
+            self.wfile.write(json.dumps({"error": str(e)}).encode())
 
-def data_poller():
+
+def data_poller(args):
     global solarman, latest_data
     while True:
         try:
+            if solarman is None:
+                try:
+                    solarman = PySolarmanV5(
+                        args.host,
+                        INVERTER_SN,
+                        port=args.port,
+                        mb_slave_id=MB_SLAVE_ID,
+                        timeout=5,
+                        retry_count=3,
+                    )
+                    solarman.read_holding_registers(79, 1)
+                    print("Reconnected to inverter.")
+                except Exception as e:
+                    print(f"Reconnect failed: {e}")
+                    solarman = None
+                    time.sleep(5)
+                    continue
             vals = read_all(solarman)
             if vals:
                 with data_lock:
                     latest_data = vals
+                with _buffer_lock:
+                    _reading_buffer.append(vals)
         except Exception as e:
             print(f"Poller error: {e}")
+            solarman = None
         time.sleep(3)
 
 
@@ -510,8 +416,8 @@ def main():
                         help=f"Modbus port (default: {INVERTER_PORT})")
     parser.add_argument("--interval", type=int, default=3,
                         help="Polling interval in seconds (default: 3)")
-    parser.add_argument("--log-file", default=LOG_FILE,
-                        help=f"CSV log file (default: {LOG_FILE})")
+    parser.add_argument("--db", default=None,
+                        help="SQLite database file path for logging")
     args = parser.parse_args()
 
     signal.signal(signal.SIGINT, signal_handler)
@@ -549,8 +455,17 @@ def main():
         sys.exit(1)
 
     # Start data poller thread
-    poller = threading.Thread(target=data_poller, daemon=True)
+    poller = threading.Thread(target=data_poller, args=(args,), daemon=True)
     poller.start()
+
+    # Start DB writer thread
+    db_writer = None
+    if args.db:
+        db_writer = threading.Thread(
+            target=_db_writer, args=(args.db, _db_write_interval), daemon=True
+        )
+        db_writer.start()
+        print(f"SQLite logging enabled: {args.db}")
 
     # Start HTTP server
     try:
