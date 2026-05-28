@@ -610,6 +610,9 @@ document.getElementById('endDateTime').addEventListener('change', loadGraphData)
 
 // Load graph on page load
 setTimeout(loadGraphData, 1000);
+
+// Refresh graph every 10 minutes
+setInterval(loadGraphData, 10 * 60 * 1000);
 </script>
 </body>
 </html>
