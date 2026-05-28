@@ -1,5 +1,6 @@
-reference/
-deye-data.csv
+*.db
+*.db-shm
+*.db-wal
+venv/
 __pycache__/
 *.pyc
-.env
