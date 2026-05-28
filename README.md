@@ -1,5 +1,7 @@
 # Deye Inverter Monitor
 
+![Dashboard Screenshot](screenshot.png)
+
 Monitor a Deye SUN-6k-SG03LP1-EU hybrid solar inverter via Modbus/TCP over Ethernet.
 
 ## Architecture

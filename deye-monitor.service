@@ -1,0 +1,16 @@
+[Unit]
+Description=Deye Inverter Monitor
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+ExecStart=/home/me/tools/deye/venv/bin/python3 /home/me/tools/deye/app.py --http-port 80
+WorkingDirectory=/home/me/tools/deye
+Restart=always
+RestartSec=5
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target
