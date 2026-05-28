@@ -362,12 +362,12 @@ setInterval(update, 3000);
 // ─── Graph ──────────────────────────────────────────────────────────────────
 
 const graphMetrics = [
-    { key: 'PV1 Power', label: 'PV1 Power', color: '#f0883e', unit: 'W' },
-    { key: 'PV2 Power', label: 'PV2 Power', color: '#f778ba', unit: 'W' },
-    { key: 'Grid Power', label: 'Grid Power', color: '#3fb950', unit: 'W' },
-    { key: 'Load Power Total', label: 'Load Power', color: '#d29922', unit: 'W' },
-    { key: 'Battery Power', label: 'Battery Power', color: '#a371f7', unit: 'W' },
-    { key: 'Battery SOC', label: 'Battery SOC', color: '#ffa657', unit: '%' },
+    { key: 'PV1 Power', label: 'PV1 Power', color: '#f0883e', unit: 'W', yaxis: 'y' },
+    { key: 'PV2 Power', label: 'PV2 Power', color: '#f778ba', unit: 'W', yaxis: 'y' },
+    { key: 'Grid Power', label: 'Grid Power', color: '#3fb950', unit: 'W', yaxis: 'y' },
+    { key: 'Load Power Total', label: 'Load Power', color: '#d29922', unit: 'W', yaxis: 'y' },
+    { key: 'Battery Power', label: 'Battery Power', color: '#a371f7', unit: 'W', yaxis: 'y' },
+    { key: 'Battery SOC', label: 'Battery SOC', color: '#ffa657', unit: '%', yaxis: 'y2' },
 ];
 
 let graphInitialized = false;
@@ -388,6 +388,15 @@ let graphLayout = {
         zerolinecolor: '#21262d',
         tickfont: { size: 10 },
         title: { text: 'Power (W)', font: { size: 12 } },
+    },
+    yaxis2: {
+        gridcolor: '#21262d',
+        zerolinecolor: '#21262d',
+        tickfont: { size: 10 },
+        title: { text: 'SOC (%)', font: { size: 12 } },
+        side: 'right',
+        overlaying: 'y',
+        range: [0, 100],
     },
     hovermode: 'closest',
     showlegend: true,
@@ -414,6 +423,7 @@ function initGraph() {
         mode: 'lines',
         line: { width: 1.5, color: m.color },
         connectgaps: false,
+        yaxis: m.yaxis,
     }));
 
     Plotly.newPlot('graph', graphData, graphLayout, graphConfig);
@@ -425,7 +435,7 @@ function initGraph() {
         // Only reset y-axis on zoom actions, not pan
         if (eventData.source === 'select' || eventData.source === 'zoom') {
             if (eventData['yaxis.range[0]'] !== undefined || eventData['yaxis.range[1]'] !== undefined) {
-                Plotly.relayout(graphDiv, { 'yaxis.autorange': true });
+                Plotly.relayout(graphDiv, { 'yaxis.autorange': true, 'yaxis2.autorange': false });
             }
         }
     });
@@ -510,7 +520,7 @@ function handleContextMenuAction(action) {
 
     switch (action) {
         case 'resetZoom':
-            Plotly.relayout(graphDiv, { 'xaxis.autorange': true, 'yaxis.autorange': true });
+            Plotly.relayout(graphDiv, { 'xaxis.autorange': true, 'yaxis.autorange': true, 'yaxis2.autorange': false });
             break;
         case 'fit1h':
             endTime = now.toISOString();
