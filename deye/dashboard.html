@@ -56,6 +56,21 @@ body {
     display: flex;
 }
 
+.show-graph-btn {
+    display: none;
+    background: #161b22;
+    border: 1px solid #30363d;
+    border-radius: 6px;
+    color: #c9d1d9;
+    padding: 5px 12px;
+    font-size: 0.8rem;
+    cursor: pointer;
+}
+
+.show-graph-btn:hover {
+    border-color: #58a6ff;
+}
+
 .graph-section {
     background: #161b22;
     border: 1px solid #30363d;
@@ -92,6 +107,24 @@ body {
     padding-bottom: 6px;
     border-bottom: 1px solid #21262d;
     color: #58a6ff;
+}
+
+.graph-close-btn {
+    display: none;
+    position: absolute;
+    top: 8px;
+    right: 12px;
+    background: none;
+    border: none;
+    color: #8b949e;
+    font-size: 1.2rem;
+    cursor: pointer;
+    padding: 4px 8px;
+    z-index: 20;
+}
+
+.graph-close-btn:hover {
+    color: #c9d1d9;
 }
 
 #graph {
@@ -193,12 +226,40 @@ body {
     .controls { gap: 8px; }
     .graph-section { padding: 8px; }
     .graph-title { font-size: 0.7rem; }
-    #graph { min-height: 80px; }
+    #graph { min-height: 100px; }
+    .js-plotly-plot .plotly .legend { font-size: 9px !important; }
+}
+
+body.is-phone .show-graph-btn {
+    display: block;
+}
+
+body.is-phone .graph-section {
+    display: none !important;
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    z-index: 1000;
+    padding: 12px;
+    max-height: none;
+    border-radius: 0;
+    margin: 0;
+}
+
+body.is-phone .graph-section.mobile-visible {
+    display: flex !important;
+}
+
+body.is-phone .graph-close-btn {
+    display: block;
 }
 </style>
 </head>
 <body>
 <div class="controls">
+    <button class="show-graph-btn" id="showGraphBtn">&#9642; Graph</button>
     <label>Time range:</label>
     <select id="rangeSelect">
         <option value="1d">Last 24 hours</option>
@@ -223,6 +284,7 @@ body {
     </div>
 </div>
 <div class="graph-section" id="graphSection">
+    <button class="graph-close-btn" id="graphCloseBtn">&times;</button>
     <div class="graph-title">Performance History</div>
     <div id="graph"></div>
     <div class="graph-resize-handle" id="graphResizeHandle"></div>
@@ -393,8 +455,62 @@ let graphLayout = {
         bordercolor: '#30363d',
         borderwidth: 1,
         font: { size: 10 },
+        orientation: 'h',
+        x: 0,
+        y: 1.08,
+        xanchor: 'left',
+        yanchor: 'bottom',
     },
 };
+
+function isPhone() {
+    var isTouch = ('ontouchstart' in window) || (navigator.maxTouchPoints > 0);
+    var maxDim = Math.max(window.innerWidth, window.innerHeight);
+    return isTouch && maxDim < 1000;
+}
+
+function applyPhoneDetection() {
+    if (isPhone()) {
+        document.body.classList.add('is-phone');
+    } else {
+        document.body.classList.remove('is-phone');
+    }
+}
+
+applyPhoneDetection();
+window.addEventListener('resize', applyPhoneDetection);
+
+function updateMobileLayout() {
+    const div = document.getElementById('graph');
+    if (!div || !div.data) return;
+    if (isPhone()) {
+        Plotly.relayout(div, {
+            'yaxis.title.text': '',
+            'yaxis2.title.text': '',
+            'margin.t': 36,
+            'margin.r': 16,
+            'margin.b': 30,
+            'margin.l': 16,
+            'legend.orientation': 'h',
+            'legend.x': 0.5,
+            'legend.y': 1.12,
+            'legend.xanchor': 'center',
+            'legend.yanchor': 'bottom',
+            'legend.font.size': 9,
+            'legend.traceorder': 'normal',
+        });
+    } else {
+        Plotly.relayout(div, {
+            'yaxis.title.text': 'Power (W)',
+            'yaxis2.title.text': 'SOC (%)',
+            'margin.t': 16,
+            'margin.r': 60,
+            'margin.b': 40,
+            'margin.l': 56,
+            'legend.font.size': 10,
+        });
+    }
+}
 
 const graphConfig = {
     scrollZoom: true,
@@ -417,6 +533,9 @@ function initGraph() {
     Plotly.newPlot('graph', graphData, graphLayout, graphConfig);
 
     const graphDiv = document.getElementById('graph');
+
+    updateMobileLayout();
+    window.addEventListener('resize', updateMobileLayout);
 
     graphDiv.on('plotly_relayout', function(eventData) {
         if (!eventData || !eventData.source) return;
@@ -467,6 +586,21 @@ function initGraph() {
         isResizing = false;
         document.body.style.userSelect = '';
     });
+
+    // Mobile graph toggle
+    const showGraphBtn = document.getElementById('showGraphBtn');
+    const graphCloseBtn = document.getElementById('graphCloseBtn');
+    if (showGraphBtn && graphCloseBtn && isPhone()) {
+        showGraphBtn.addEventListener('click', function() {
+            graphSection.classList.add('mobile-visible');
+            setTimeout(function() {
+                Plotly.Plots.resize(graphDiv);
+            }, 100);
+        });
+        graphCloseBtn.addEventListener('click', function() {
+            graphSection.classList.remove('mobile-visible');
+        });
+    }
 }
 
 function showContextMenu(x, y) {
