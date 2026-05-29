@@ -315,28 +315,16 @@ class Inverter:
         while True:
             try:
                 if self.solarman is None:
-                    try:
-                        self.solarman = PySolarmanV5(
-                            self.host,
-                            self.sn,
-                            port=self.port,
-                            mb_slave_id=MB_SLAVE_ID,
-                            timeout=5,
-                            retry_count=3,
-                        )
-                        self.solarman.read_holding_registers(79, 1)
-                        print("Reconnected to inverter.")
-                    except Exception as e:
-                        print(f"Reconnect failed: {e}")
-                        self.solarman = None
-                        time.sleep(5)
-                        continue
+                    self.connect()
                 vals = read_all(self.solarman)
                 if vals:
                     with self.data_lock:
                         self.latest_data = vals
                     with _buffer_lock:
                         _reading_buffer.append(vals)
+                else:
+                    print("  Read failed, disconnecting to force reconnection...")
+                    self.solarman = None
             except Exception as e:
                 print(f"Poller error: {e}")
                 self.solarman = None

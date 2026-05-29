@@ -516,7 +516,8 @@ const graphConfig = {
     scrollZoom: true,
     displayModeBar: false,
     responsive: true,
-    modeBarButtonsToRemove: ['lasso2d', 'select2d'],
+    modeBarButtonsToRemove: ['lasso2d', 'select2d', 'pan'],
+    dragmode: 'zoom',
 };
 
 function initGraph() {
@@ -543,18 +544,6 @@ function initGraph() {
             if (eventData['yaxis.range[0]'] !== undefined || eventData['yaxis.range[1]'] !== undefined) {
                 Plotly.relayout(graphDiv, { 'yaxis.autorange': true, 'yaxis2.autorange': false });
             }
-        }
-    });
-
-    graphDiv.on('plotly_click', function(eventData) {
-        if (eventData && eventData.event && eventData.event.button === 0) {
-            showContextMenu(eventData.event.clientX, eventData.event.clientY);
-        }
-    });
-
-    graphDiv.on('plotly_contextmenu', function(eventData) {
-        if (eventData && eventData.event) {
-            showContextMenu(eventData.event.clientX, eventData.event.clientY);
         }
     });
 
@@ -600,97 +589,6 @@ function initGraph() {
         graphCloseBtn.addEventListener('click', function() {
             graphSection.classList.remove('mobile-visible');
         });
-    }
-}
-
-function showContextMenu(x, y) {
-    removeContextMenu();
-    const menu = document.createElement('div');
-    menu.id = 'graphContextMenu';
-    menu.style.position = 'fixed';
-    menu.style.left = x + 'px';
-    menu.style.top = y + 'px';
-    menu.style.background = '#161b22';
-    menu.style.border = '1px solid #30363d';
-    menu.style.borderRadius = '8px';
-    menu.style.padding = '6px 0';
-    menu.style.zIndex = '1000';
-    menu.style.minWidth = '180px';
-    menu.style.boxShadow = '0 8px 24px rgba(0,0,0,0.4)';
-
-    const items = [
-        { label: 'Reset zoom to fit all', action: 'resetZoom' },
-        { label: 'Fit last 1 hour', action: 'fit1h' },
-        { label: 'Fit last 6 hours', action: 'fit6h' },
-        { label: 'Fit last 24 hours', action: 'fit24h' },
-    ];
-
-    items.forEach(item => {
-        const btn = document.createElement('div');
-        btn.style.padding = '8px 16px';
-        btn.style.cursor = 'pointer';
-        btn.style.fontSize = '13px';
-        btn.style.color = '#c9d1d9';
-        btn.style.textAlign = 'left';
-        btn.textContent = item.label;
-        btn.onmouseover = () => { btn.style.background = '#21262d'; };
-        btn.onmouseout = () => { btn.style.background = 'transparent'; };
-        btn.onclick = () => {
-            handleContextMenuAction(item.action);
-            removeContextMenu();
-        };
-        menu.appendChild(btn);
-    });
-
-    document.body.appendChild(menu);
-
-    setTimeout(() => {
-        document.addEventListener('click', function handler(e) {
-            if (!menu.contains(e.target)) {
-                removeContextMenu();
-                document.removeEventListener('click', handler);
-            }
-        });
-    }, 10);
-}
-
-function removeContextMenu() {
-    const menu = document.getElementById('graphContextMenu');
-    if (menu) menu.remove();
-}
-
-function handleContextMenuAction(action) {
-    const graphDiv = document.getElementById('graph');
-    if (!graphDiv || graphData.length === 0) return;
-
-    let startTime, endTime;
-    const now = new Date();
-
-    switch (action) {
-        case 'resetZoom':
-            Plotly.relayout(graphDiv, { 'xaxis.autorange': true });
-            break;
-        case 'fit1h':
-            endTime = now.toISOString();
-            startTime = new Date(now.getTime() - 3600000).toISOString();
-            Plotly.relayout(graphDiv, {
-                'xaxis.range': [startTime, endTime],
-            });
-            break;
-        case 'fit6h':
-            endTime = now.toISOString();
-            startTime = new Date(now.getTime() - 21600000).toISOString();
-            Plotly.relayout(graphDiv, {
-                'xaxis.range': [startTime, endTime],
-            });
-            break;
-        case 'fit24h':
-            endTime = now.toISOString();
-            startTime = new Date(now.getTime() - 86400000).toISOString();
-            Plotly.relayout(graphDiv, {
-                'xaxis.range': [startTime, endTime],
-            });
-            break;
     }
 }
 
