@@ -405,7 +405,6 @@ function update() {
 }
 
 update();
-setInterval(update, 3000);
 
 // ─── Graph ──────────────────────────────────────────────────────────────────
 
@@ -449,6 +448,7 @@ let graphLayout = {
         fixedrange: true,
     },
     hovermode: 'closest',
+    dragmode: 'pan',
     showlegend: true,
     legend: {
         bgcolor: 'rgba(22,27,34,0.8)',
@@ -516,8 +516,7 @@ const graphConfig = {
     scrollZoom: true,
     displayModeBar: false,
     responsive: true,
-    modeBarButtonsToRemove: ['lasso2d', 'select2d', 'pan'],
-    dragmode: 'zoom',
+    modeBarButtonsToRemove: ['lasso2d', 'select2d'],
 };
 
 function initGraph() {
@@ -534,6 +533,19 @@ function initGraph() {
     Plotly.newPlot('graph', graphData, graphLayout, graphConfig);
 
     const graphDiv = document.getElementById('graph');
+
+    // Force default cursor to override Plotly's pan cursor
+    function forceDefaultCursor() {
+        const svg = graphDiv.querySelector('.main-svg');
+        if (svg) {
+            svg.style.cursor = 'default';
+            svg.querySelectorAll('*').forEach(el => {
+                el.style.cursor = 'default';
+            });
+        }
+        requestAnimationFrame(forceDefaultCursor);
+    }
+    forceDefaultCursor();
 
     updateMobileLayout();
     window.addEventListener('resize', updateMobileLayout);
@@ -634,19 +646,35 @@ function loadGraphData() {
 
 // Refresh interval management
 let refreshTimer = null;
+let graphRefreshTimer = null;
+
+function startRefresh() {
+    stopRefresh();
+    const val = parseInt(document.getElementById('refreshSelect').value);
+    if (val > 0) {
+        refreshTimer = setInterval(update, val * 60 * 1000);
+    }
+}
+
+function stopRefresh() {
+    if (refreshTimer) {
+        clearInterval(refreshTimer);
+        refreshTimer = null;
+    }
+}
 
 function startGraphRefresh() {
     stopGraphRefresh();
     const val = parseInt(document.getElementById('refreshSelect').value);
     if (val > 0) {
-        refreshTimer = setInterval(loadGraphData, val * 60 * 1000);
+        graphRefreshTimer = setInterval(loadGraphData, val * 60 * 1000);
     }
 }
 
 function stopGraphRefresh() {
-    if (refreshTimer) {
-        clearInterval(refreshTimer);
-        refreshTimer = null;
+    if (graphRefreshTimer) {
+        clearInterval(graphRefreshTimer);
+        graphRefreshTimer = null;
     }
 }
 
@@ -666,13 +694,17 @@ document.getElementById('rangeSelect').addEventListener('change', function() {
     loadGraphData();
 });
 
-document.getElementById('refreshSelect').addEventListener('change', startGraphRefresh);
+document.getElementById('refreshSelect').addEventListener('change', function() {
+    startRefresh();
+    startGraphRefresh();
+});
 
 document.getElementById('startDateTime').addEventListener('change', loadGraphData);
 document.getElementById('endDateTime').addEventListener('change', loadGraphData);
 
 // Load graph on page load
 setTimeout(loadGraphData, 1000);
+startRefresh();
 startGraphRefresh();
 </script>
 </body>
