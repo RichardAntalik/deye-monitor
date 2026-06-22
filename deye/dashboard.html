@@ -20,11 +20,36 @@ body {
 
 .controls {
     display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 16px;
+    flex-wrap: wrap;
+    margin-bottom: 12px;
+}
+
+.controls-center {
+    display: flex;
     justify-content: center;
     align-items: center;
     gap: 16px;
-    margin-bottom: 12px;
     flex-wrap: wrap;
+    flex: 1;
+}
+
+.analytics-btn {
+    color: #8b949e;
+    text-decoration: none;
+    font-size: 0.8rem;
+    padding: 4px 12px;
+    border-radius: 6px;
+    border: 1px solid #30363d;
+    background: #161b22;
+    transition: all 0.2s;
+}
+
+.analytics-btn:hover {
+    color: #58a6ff;
+    border-color: #58a6ff;
 }
 
 .controls label {
@@ -259,6 +284,7 @@ body.is-phone .graph-close-btn {
 </head>
 <body>
 <div class="controls">
+    <div class="controls-center">
     <button class="show-graph-btn" id="showGraphBtn">&#9642; Graph</button>
     <label>Time range:</label>
     <select id="rangeSelect">
@@ -282,6 +308,8 @@ body.is-phone .graph-close-btn {
         <span>to</span>
         <input type="datetime-local" id="endDateTime">
     </div>
+    </div>
+    <a href="/deye/analytics" class="analytics-btn">Analytics</a>
 </div>
 <div class="graph-section" id="graphSection">
     <button class="graph-close-btn" id="graphCloseBtn">&times;</button>

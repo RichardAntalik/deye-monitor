@@ -1,0 +1,428 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>PV Analytics</title>
+<script src="https://cdn.plot.ly/plotly-2.27.0.min.js"></script>
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+
+body {
+    font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
+    background: #0d1117;
+    color: #c9d1d9;
+    min-height: 100vh;
+    padding: 12px;
+    display: flex;
+    flex-direction: column;
+}
+
+.controls {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 16px;
+    flex-wrap: wrap;
+    margin-bottom: 12px;
+}
+
+.controls-center {
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    gap: 16px;
+    flex-wrap: wrap;
+    flex: 1;
+}
+
+.analytics-btn {
+    color: #8b949e;
+    text-decoration: none;
+    font-size: 0.8rem;
+    padding: 4px 12px;
+    border-radius: 6px;
+    border: 1px solid #30363d;
+    background: #161b22;
+    transition: all 0.2s;
+}
+
+.analytics-btn:hover {
+    color: #58a6ff;
+    border-color: #58a6ff;
+}
+
+.controls label {
+    font-size: 0.8rem;
+    color: #8b949e;
+}
+
+.controls select, .controls input {
+    background: #161b22;
+    border: 1px solid #30363d;
+    border-radius: 6px;
+    color: #c9d1d9;
+    padding: 5px 10px;
+    font-size: 0.8rem;
+}
+
+.controls select:focus, .controls input:focus {
+    outline: none;
+    border-color: #58a6ff;
+}
+
+.custom-range {
+    display: none;
+    gap: 8px;
+    align-items: center;
+}
+
+.custom-range.visible {
+    display: flex;
+}
+
+.chart-section {
+    background: #161b22;
+    border: 1px solid #30363d;
+    border-radius: 10px;
+    padding: 12px;
+    flex: 1;
+    min-height: 400px;
+    margin-bottom: 12px;
+    display: flex;
+    flex-direction: column;
+}
+
+.chart-title {
+    font-size: 0.75rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    margin-bottom: 8px;
+    padding-bottom: 6px;
+    border-bottom: 1px solid #21262d;
+    color: #58a6ff;
+}
+
+#chart {
+    width: 100%;
+    flex: 1;
+    min-height: 350px;
+}
+
+.summary {
+    background: #161b22;
+    border: 1px solid #30363d;
+    border-radius: 10px;
+    padding: 12px;
+    margin-bottom: 12px;
+}
+
+.summary-title {
+    font-size: 0.75rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    margin-bottom: 8px;
+    padding-bottom: 6px;
+    border-bottom: 1px solid #21262d;
+    color: #58a6ff;
+}
+
+.summary-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+    gap: 8px;
+}
+
+.summary-item {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    padding: 8px;
+    background: #0d1117;
+    border-radius: 6px;
+}
+
+.summary-label {
+    font-size: 0.7rem;
+    color: #8b949e;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+}
+
+.summary-value {
+    font-size: 1.1rem;
+    font-weight: 600;
+    font-variant-numeric: tabular-nums;
+}
+
+.summary-unit {
+    font-size: 0.7rem;
+    color: #8b949e;
+    font-weight: 400;
+}
+
+.summary-item.pv .summary-value { color: #f0883e; }
+.summary-item.grid .summary-value { color: #3fb950; }
+
+.status-bar {
+    text-align: center;
+    font-size: 0.65rem;
+    color: #484f58;
+    margin-top: 4px;
+}
+
+.status-bar .error { color: #f85149; }
+
+@media (max-width: 600px) {
+    body { padding: 6px; }
+    .summary-grid { grid-template-columns: repeat(2, 1fr); }
+    .controls { gap: 8px; }
+    .chart-section { padding: 8px; min-height: 300px; }
+    #chart { min-height: 260px; }
+}
+</style>
+</head>
+<body>
+<div class="controls">
+    <div class="controls-center">
+    <label>Time range:</label>
+    <select id="rangeSelect">
+        <option value="week">This Week</option>
+        <option value="month" selected>This Month</option>
+        <option value="year">This Year</option>
+        <option value="lifetime">Lifetime</option>
+        <option value="custom">Custom range</option>
+    </select>
+    <div class="custom-range" id="customRange">
+        <input type="datetime-local" id="startDateTime">
+        <span>to</span>
+        <input type="datetime-local" id="endDateTime">
+    </div>
+    </div>
+    <a href="/deye/" class="analytics-btn">Dashboard</a>
+</div>
+<div class="chart-section">
+    <div class="chart-title">Energy Overview</div>
+    <div id="chart"></div>
+</div>
+<div class="summary" id="summarySection">
+    <div class="summary-title">Summary</div>
+    <div class="summary-grid" id="summaryGrid"></div>
+</div>
+<div class="status-bar" id="status">Loading...</div>
+
+<script>
+const metrics = [
+    { key: 'pv_kwh', label: 'PV Generated', cls: 'pv', color: '#f0883e' },
+    { key: 'grid_import_kwh', label: 'Grid Import', cls: 'grid', color: '#3fb950' },
+];
+
+const chartMetrics = [
+    { key: 'pv_kwh', label: 'PV Generated', color: '#f0883e' },
+    { key: 'grid_import_kwh', label: 'Grid Import', color: '#3fb950' },
+];
+
+let chartInitialized = false;
+let chartData = [];
+let chartLayout = {
+    paper_bgcolor: '#161b22',
+    plot_bgcolor: '#161b22',
+    font: { color: '#c9d1d9', family: 'Segoe UI, system-ui, sans-serif' },
+    margin: { t: 16, r: 20, b: 60, l: 56 },
+    xaxis: {
+        type: 'category',
+        gridcolor: '#21262d',
+        zerolinecolor: '#21262d',
+        tickfont: { size: 10 },
+        tickangle: -30,
+    },
+    yaxis: {
+        gridcolor: '#21262d',
+        zerolinecolor: '#21262d',
+        tickfont: { size: 10 },
+        title: { text: 'Energy (kWh)', font: { size: 11 } },
+        fixedrange: true,
+    },
+    hovermode: 'x unified',
+    dragmode: 'pan',
+    showlegend: true,
+    legend: {
+        bgcolor: 'rgba(22,27,34,0.8)',
+        bordercolor: '#30363d',
+        borderwidth: 1,
+        font: { size: 10 },
+        orientation: 'h',
+        x: 0,
+        y: 1.12,
+        xanchor: 'left',
+        yanchor: 'bottom',
+    },
+    barmode: 'group',
+};
+
+const chartConfig = {
+    scrollZoom: true,
+    displayModeBar: false,
+    responsive: true,
+    modeBarButtonsToRemove: ['lasso2d', 'select2d'],
+};
+
+function fmtKwh(val) {
+    if (val === null || val === undefined) return 'N/A';
+    if (val >= 1000) return (val / 1000).toFixed(3) + ' MWh';
+    if (val >= 1) return val.toFixed(3) + ' kWh';
+    return (val * 1000).toFixed(1) + ' Wh';
+}
+
+function fmtAvg(val) {
+    if (val === null || val === undefined) return 'N/A';
+    if (val >= 1) return val.toFixed(3) + ' kWh/day';
+    return (val * 1000).toFixed(1) + ' Wh/day';
+}
+
+function renderSummary(totals) {
+    const grid = document.getElementById('summaryGrid');
+    let html = '';
+    for (const m of metrics) {
+        const totalKey = m.key;
+        const avgKey = 'daily_avg_' + m.key;
+        const total = totals[totalKey] || 0;
+        const avg = totals[avgKey] || 0;
+        html += '<div class="summary-item ' + m.cls + '">' +
+            '<span class="summary-label">' + m.label + '</span>' +
+            '<span class="summary-value">' + fmtKwh(total) + '</span>' +
+            '<span class="summary-unit">avg ' + fmtAvg(avg) + '</span>' +
+            '</div>';
+    }
+    grid.innerHTML = html;
+}
+
+function initChart() {
+    chartData = chartMetrics.map(m => ({
+        x: [],
+        y: [],
+        name: m.label,
+        type: 'bar',
+        marker: { color: m.color },
+    }));
+
+    Plotly.newPlot('chart', chartData, chartLayout, chartConfig);
+    chartInitialized = true;
+}
+
+function loadAnalytics() {
+    const rangeSelect = document.getElementById('rangeSelect');
+    const range = rangeSelect.value;
+    let startTs, endTs;
+    const now = new Date();
+    const nowTs = Math.floor(now.getTime() / 1000);
+
+    if (range === 'custom') {
+        const startInput = document.getElementById('startDateTime').value;
+        const endInput = document.getElementById('endDateTime').value;
+        if (!startInput || !endInput) return;
+        startTs = Math.floor(new Date(startInput).getTime() / 1000);
+        endTs = Math.floor(new Date(endInput).getTime() / 1000);
+    } else if (range === 'lifetime') {
+        startTs = 0;
+        endTs = nowTs;
+    } else if (range === 'week') {
+        const d = new Date(now);
+        const day = d.getDay() || 7;
+        if (day !== 1) d.setDate(d.getDate() - day + 1);
+        d.setHours(0, 0, 0, 0);
+        startTs = Math.floor(d.getTime() / 1000);
+        endTs = nowTs;
+    } else if (range === 'month') {
+        const d = new Date(now);
+        d.setDate(1);
+        d.setHours(0, 0, 0, 0);
+        startTs = Math.floor(d.getTime() / 1000);
+        endTs = nowTs;
+    } else if (range === 'year') {
+        const d = new Date(now);
+        d.setMonth(0, 1);
+        d.setHours(0, 0, 0, 0);
+        startTs = Math.floor(d.getTime() / 1000);
+        endTs = nowTs;
+    }
+
+    Promise.all([
+        fetch('api/analytics/period?range=' + range +
+            (range === 'custom' ? '&start=' + startTs + '&end=' + endTs : ''))
+            .then(r => r.json()),
+        fetch('api/analytics/period_data?range=' + range +
+            (range === 'custom' ? '&start=' + startTs + '&end=' + endTs : ''))
+            .then(r => r.json()),
+    ]).then(([totals, periodData]) => {
+        if (totals.error) {
+            document.getElementById('status').innerHTML = '<span class="error">Error: ' + totals.error + '</span>';
+            return;
+        }
+        if (periodData.error) {
+            document.getElementById('status').innerHTML = '<span class="error">Error: ' + periodData.error + '</span>';
+            return;
+        }
+
+        if (!chartInitialized) {
+            initChart();
+        }
+
+        let labels;
+        if (range === 'year') {
+            const monthNames = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+            labels = periodData.map(d => {
+                const parts = d.period.split('-');
+                return monthNames[parseInt(parts[1]) - 1];
+            });
+        } else {
+            const dayNames = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+            const monthNames = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+            labels = periodData.map(d => {
+                const parts = d.period.split('-');
+                const month = monthNames[parseInt(parts[1]) - 1];
+                const day = parseInt(parts[2]);
+                return month + ' ' + day;
+            });
+        }
+        chartData.forEach((trace, idx) => {
+            const metric = chartMetrics[idx];
+            trace.x = labels;
+            trace.y = periodData.map(d => d[metric.key] || 0);
+        });
+
+        Plotly.react('chart', chartData, chartLayout, chartConfig);
+        renderSummary(totals);
+        document.getElementById('status').textContent = 'Updated ' + new Date().toLocaleTimeString();
+        document.getElementById('status').className = 'status-bar';
+    }).catch(e => {
+        document.getElementById('status').innerHTML = '<span class="error">Error: ' + e.message + '</span>';
+        console.error('Failed to load analytics:', e);
+    });
+}
+
+document.getElementById('rangeSelect').addEventListener('change', function() {
+    const customRange = document.getElementById('customRange');
+    if (this.value === 'custom') {
+        customRange.classList.add('visible');
+        const now = new Date();
+        const oneDayAgo = new Date(now.getTime() - 86400000);
+        const pad = (n) => String(n).padStart(2, '0');
+        const toLocal = (d) => d.getFullYear() + '-' + pad(d.getMonth()+1) + '-' + pad(d.getDate()) + 'T' + pad(d.getHours()) + ':' + pad(d.getMinutes());
+        document.getElementById('endDateTime').value = toLocal(now);
+        document.getElementById('startDateTime').value = toLocal(oneDayAgo);
+    } else {
+        customRange.classList.remove('visible');
+    }
+    loadAnalytics();
+});
+
+document.getElementById('startDateTime').addEventListener('change', loadAnalytics);
+document.getElementById('endDateTime').addEventListener('change', loadAnalytics);
+
+setTimeout(loadAnalytics, 500);
+</script>
+</body>
+</html>
