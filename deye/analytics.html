@@ -165,6 +165,7 @@ body {
 
 .summary-item.pv .summary-value { color: #f0883e; }
 .summary-item.grid .summary-value { color: #3fb950; }
+.summary-item.consumption .summary-value { color: #58a6ff; }
 
 .status-bar {
     text-align: center;
@@ -215,13 +216,16 @@ body {
 
 <script>
 const metrics = [
+    { key: 'consumption_kwh', label: 'Total Consumption', cls: 'consumption', color: '#58a6ff' },
     { key: 'pv_kwh', label: 'PV Generated', cls: 'pv', color: '#f0883e' },
     { key: 'grid_import_kwh', label: 'Grid Import', cls: 'grid', color: '#3fb950' },
 ];
 
+// Reordered and updated colors/offsetgroups to achieve the mixed overlay effect
 const chartMetrics = [
-    { key: 'pv_kwh', label: 'PV Generated', color: '#f0883e' },
-    { key: 'grid_import_kwh', label: 'Grid Import', color: '#3fb950' },
+    { key: 'pv_kwh', label: 'PV Generated', color: '#f0883e', offsetgroup: 'pv' },
+    { key: 'consumption_kwh', label: 'Total Consumption', color: 'rgba(88, 166, 255, 0.65)', offsetgroup: 'demand' },
+    { key: 'grid_import_kwh', label: 'Grid Import', color: '#3fb950', offsetgroup: 'demand' },
 ];
 
 let chartInitialized = false;
@@ -259,7 +263,7 @@ let chartLayout = {
         xanchor: 'left',
         yanchor: 'bottom',
     },
-    barmode: 'group',
+    barmode: 'group', // Keeps unique offsetgroups side-by-side
 };
 
 const chartConfig = {
@@ -306,6 +310,7 @@ function initChart() {
         name: m.label,
         type: 'bar',
         marker: { color: m.color },
+        offsetgroup: m.offsetgroup // Maps traces to custom alignment lanes
     }));
 
     Plotly.newPlot('chart', chartData, chartLayout, chartConfig);
