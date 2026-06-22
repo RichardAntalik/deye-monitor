@@ -212,7 +212,7 @@ def _average_readings(readings):
     return result
 
 
-def _db_writer(db_path, interval):
+def _db_writer(db_path, interval, analytics_update=None):
     _create_db(db_path)
     while not _db_stop_event.is_set():
         _db_stop_event.wait(interval)
@@ -235,6 +235,8 @@ def _db_writer(db_path, interval):
             sql = f"INSERT OR REPLACE INTO readings (timestamp, {', '.join(cols)}) VALUES ({ts}, {', '.join(vals)})"
             _db_conn.execute(sql)
             _db_conn.commit()
+            if analytics_update:
+                analytics_update(ts, avg)
         except Exception as e:
             print(f"  DB write error: {e}")
 
@@ -301,7 +303,7 @@ class Inverter:
         self._db_stop_event = threading.Event()
         if self.db_path:
             self._db_writer_thread = threading.Thread(
-                target=_db_writer, args=(self.db_path, _db_write_interval), daemon=True
+                target=_db_writer, args=(self.db_path, _db_write_interval, self._analytics_update), daemon=True
             )
             self._db_writer_thread.start()
             print(f"SQLite logging enabled: {self.db_path}")

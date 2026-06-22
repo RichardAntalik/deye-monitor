@@ -3,5 +3,6 @@
     "port": 8899,
     "sn": 3168400438,
     "interval": 3,
-    "db": "test.db"
+    "db": "/mnt/storage/deye_db/test.db",
+    "analytics_db": "/mnt/storage/deye_db/analytics.db"
 }

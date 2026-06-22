@@ -152,12 +152,12 @@ def api_analytics_lifetime():
         return jsonify({"error": "Analytics not configured"}), 503
     cur = inverter.analytics_conn.execute("""
         SELECT
-            COALESCE(SUM(pv_wh), 0) as pv_wh,
-            COALESCE(SUM(grid_import_wh), 0) as grid_import_wh,
-            COALESCE(SUM(grid_export_wh), 0) as grid_export_wh,
-            COALESCE(SUM(battery_charge_wh), 0) as battery_charge_wh,
-            COALESCE(SUM(battery_discharge_wh), 0) as battery_discharge_wh
-        FROM minute_agg
+            COALESCE(SUM(pv_kwh), 0) as pv_kwh,
+            COALESCE(SUM(grid_import_kwh), 0) as grid_import_kwh,
+            COALESCE(SUM(grid_export_kwh), 0) as grid_export_kwh,
+            COALESCE(SUM(battery_charge_kwh), 0) as battery_charge_kwh,
+            COALESCE(SUM(battery_discharge_kwh), 0) as battery_discharge_kwh
+        FROM day_agg
     """)
     row = cur.fetchone()
     pv = row[0]
@@ -167,7 +167,7 @@ def api_analytics_lifetime():
     bd = row[4]
     consumption = pv + gi - ge - bc + bd
     return jsonify({
-        'pv_kwh': round(pv / 1000.0, 4),
-        'grid_import_kwh': round(gi / 1000.0, 4),
-        'consumption_kwh': round(consumption / 1000.0, 4),
+        'pv_kwh': round(pv, 4),
+        'grid_import_kwh': round(gi, 4),
+        'consumption_kwh': round(consumption, 4),
     })

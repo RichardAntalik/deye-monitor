@@ -35,7 +35,7 @@ def shutdown(signum, frame):
 def register_blueprints():
     """Auto-discover and register blueprints from sibling app directories."""
     for importer, modname, ispkg in pkgutil.iter_modules([_script_dir]):
-        if modname in ('app',):
+        if modname in ('app', 'deye'):
             continue
         try:
             mod = importlib.import_module(f'{modname}')
@@ -70,6 +70,9 @@ for importer, modname, ispkg in pkgutil.iter_modules([_script_dir]):
         obj = mod.create_app(app_config)
         _apps[modname] = obj
         app.extensions[modname] = obj
+        if hasattr(mod, 'bp'):
+            app.register_blueprint(mod.bp, url_prefix=f'/{modname}')
+            print(f"Registered blueprint: {modname}")
         if hasattr(obj, 'connect'):
             obj.connect()
         if hasattr(obj, 'start'):
